@@ -1,3 +1,4 @@
+// main: release candidate v1
 package com.example.taskmanager;
 
 import org.springframework.boot.SpringApplication;
