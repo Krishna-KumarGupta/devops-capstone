@@ -1,0 +1,12 @@
+com/example/taskmanager/auth/LoginResponse.class
+com/example/taskmanager/exception/GlobalExceptionHandler.class
+com/example/taskmanager/auth/AuthController.class
+com/example/taskmanager/task/Task.class
+com/example/taskmanager/task/TaskNotFoundException.class
+com/example/taskmanager/task/TaskRepository.class
+com/example/taskmanager/TaskManagerApplication.class
+com/example/taskmanager/task/TaskController.class
+com/example/taskmanager/task/TaskRequest.class
+com/example/taskmanager/auth/LoginRequest.class
+com/example/taskmanager/task/TaskService.class
+com/example/taskmanager/exception/ApiError.class

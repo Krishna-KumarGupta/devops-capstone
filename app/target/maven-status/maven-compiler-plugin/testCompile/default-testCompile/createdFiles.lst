@@ -1,0 +1,3 @@
+com/example/taskmanager/auth/AuthControllerTest.class
+com/example/taskmanager/task/TaskControllerTest.class
+com/example/taskmanager/task/TaskServiceTest.class
