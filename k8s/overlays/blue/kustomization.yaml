@@ -1,0 +1,36 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+patches:
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: task-manager-blue
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 2
+  - target:
+      version: v1
+      kind: Service
+      name: task-manager
+    patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: task-manager
+        namespace: task-manager
+  - target:
+      version: v1
+      kind: Secret
+      name: task-manager-db
+    patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: task-manager-db
+        namespace: task-manager

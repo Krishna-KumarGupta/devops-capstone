@@ -1,0 +1,143 @@
+pipeline {
+    agent any
+
+    options {
+        timestamps()
+        disableConcurrentBuilds()
+        skipDefaultCheckout(true)
+    }
+
+    parameters {
+        string(
+            name: 'IMAGE_REPOSITORY',
+            defaultValue: 'ghcr.io/your-org/task-manager',
+            description: 'Fully qualified container image repository'
+        )
+        string(
+            name: 'REGISTRY_HOST',
+            defaultValue: 'ghcr.io',
+            description: 'Container registry host used for login and image pulls'
+        )
+        choice(
+            name: 'DEPLOY_COLOR',
+            choices: ['green', 'blue'],
+            description: 'Inactive color to build and deploy'
+        )
+        booleanParam(
+            name: 'SWITCH_TRAFFIC',
+            defaultValue: false,
+            description: 'Send Service traffic to the deployed color after it is ready'
+        )
+    }
+
+    environment {
+        K8S_NAMESPACE = 'task-manager'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+                script {
+                    env.IMAGE_TAG = "${env.BUILD_NUMBER}-${env.GIT_COMMIT.take(7)}"
+                    env.IMAGE = "${params.IMAGE_REPOSITORY}:${env.IMAGE_TAG}"
+                }
+            }
+        }
+
+        stage('Maven Test') {
+            steps {
+                dir('app') {
+                    sh './mvnw test'
+                }
+            }
+        }
+
+        stage('Maven Package') {
+            steps {
+                dir('app') {
+                    sh './mvnw package -DskipTests'
+                }
+            }
+        }
+
+        stage('Docker Build') {
+            steps {
+                sh 'docker build --pull -f docker/Dockerfile -t "$IMAGE" .'
+            }
+        }
+
+        stage('Trivy vulnerability scan') {
+            steps {
+                sh '''
+                    docker run --rm \
+                      -v /var/run/docker.sock:/var/run/docker.sock \
+                      aquasec/trivy:latest image \
+                      --exit-code 1 \
+                      --severity HIGH,CRITICAL \
+                      "$IMAGE"
+                '''
+            }
+        }
+
+        stage('GitOps/deploy') {
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'container-registry',
+                        usernameVariable: 'REGISTRY_USER',
+                        passwordVariable: 'REGISTRY_PASSWORD'
+                    )
+                ]) {
+                    sh '''
+                        set +x
+                        printf '%s' "$REGISTRY_PASSWORD" |
+                          docker login "$REGISTRY_HOST" \
+                            --username "$REGISTRY_USER" \
+                            --password-stdin
+                        docker push "$IMAGE"
+                        docker logout "$REGISTRY_HOST"
+                    '''
+                    sh '''
+                        set -eu
+                        active_color=$(kubectl get service task-manager \
+                          --namespace "$K8S_NAMESPACE" \
+                          -o jsonpath='{.spec.selector.color}')
+                        if [ "$active_color" = "$DEPLOY_COLOR" ]; then
+                          echo "Refusing to update active color '$DEPLOY_COLOR'; deploy the inactive color." >&2
+                          exit 1
+                        fi
+
+                        kubectl create secret docker-registry registry-credentials \
+                          --namespace "$K8S_NAMESPACE" \
+                          --docker-server="$REGISTRY_HOST" \
+                          --docker-username="$REGISTRY_USER" \
+                          --docker-password="$REGISTRY_PASSWORD" \
+                          --dry-run=client -o yaml |
+                          kubectl apply -f -
+
+                        kubectl apply -k "k8s/overlays/$DEPLOY_COLOR"
+                        kubectl set image \
+                          "deployment/task-manager-$DEPLOY_COLOR" \
+                          "task-manager=$IMAGE" \
+                          --namespace "$K8S_NAMESPACE"
+                        kubectl rollout status \
+                          "deployment/task-manager-$DEPLOY_COLOR" \
+                          --namespace "$K8S_NAMESPACE" \
+                          --timeout=180s
+
+                        if [ "$SWITCH_TRAFFIC" = "true" ]; then
+                          ./k8s/switch-traffic.sh "$DEPLOY_COLOR" "$K8S_NAMESPACE"
+                        fi
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            sh 'docker logout "$REGISTRY_HOST" >/dev/null 2>&1 || true'
+        }
+    }
+}
