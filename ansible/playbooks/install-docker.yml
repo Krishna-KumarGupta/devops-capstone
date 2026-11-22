@@ -1,0 +1,76 @@
+---
+- name: Install Docker Engine
+  hosts: docker_hosts
+  become: true
+  vars:
+    docker_apt_arch: "{{ {'x86_64': 'amd64', 'aarch64': 'arm64'}.get(ansible_architecture, ansible_architecture) }}"
+  tasks:
+    - name: Require Debian-family Linux
+      ansible.builtin.assert:
+        that:
+          - ansible_os_family == "Debian"
+        fail_msg: This playbook currently supports Debian and Ubuntu hosts.
+
+    - name: Install Docker repository prerequisites
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Create apt keyrings directory
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Download Docker repository signing key
+      ansible.builtin.get_url:
+        url: https://download.docker.com/linux/{{ ansible_distribution | lower }}/gpg
+        dest: /tmp/docker.asc
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Install Docker repository signing key
+      ansible.builtin.command:
+        cmd: gpg --dearmor --yes --output /etc/apt/keyrings/docker.gpg /tmp/docker.asc
+        creates: /etc/apt/keyrings/docker.gpg
+
+    - name: Configure Docker apt repository
+      ansible.builtin.deb822_repository:
+        name: docker
+        types:
+          - deb
+        uris:
+          - https://download.docker.com/linux/{{ ansible_distribution | lower }}
+        suites:
+          - "{{ ansible_distribution_release }}"
+        components:
+          - stable
+        architectures:
+          - "{{ docker_apt_arch }}"
+        signed_by: /etc/apt/keyrings/docker.gpg
+        state: present
+
+    - name: Install Docker Engine and plugins
+      ansible.builtin.apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+        update_cache: true
+
+    - name: Enable and start Docker
+      ansible.builtin.service:
+        name: docker
+        state: started
+        enabled: true

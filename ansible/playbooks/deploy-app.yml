@@ -1,0 +1,32 @@
+---
+- name: Apply Task Manager Kubernetes base manifests
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    kubernetes_manifest_path: "{{ playbook_dir }}/../../k8s/base"
+    kubernetes_namespace: task-manager
+  tasks:
+    - name: Apply Task Manager manifests with Kustomize
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - apply
+          - -k
+          - "{{ kubernetes_manifest_path }}"
+      environment:
+        KUBECONFIG: "{{ lookup('ansible.builtin.env', 'KUBECONFIG') | default(omit, true) }}"
+      changed_when: "'configured' in kubectl_apply.stdout or 'created' in kubectl_apply.stdout"
+      register: kubectl_apply
+
+    - name: Wait for Task Manager deployment rollout
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - rollout
+          - status
+          - deployment/task-manager-blue
+          - --namespace
+          - "{{ kubernetes_namespace }}"
+          - --timeout=180s
+      changed_when: false

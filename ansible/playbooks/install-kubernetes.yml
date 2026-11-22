@@ -1,0 +1,112 @@
+---
+- name: Install Kubernetes node packages
+  hosts: kubernetes
+  become: true
+  vars:
+    kubernetes_minor_version: "v1.35"
+  tasks:
+    - name: Require Debian-family Linux
+      ansible.builtin.assert:
+        that:
+          - ansible_os_family == "Debian"
+        fail_msg: This playbook currently supports Debian and Ubuntu hosts.
+
+    - name: Install Kubernetes apt prerequisites
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Create apt keyrings directory
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Download Kubernetes repository signing key
+      ansible.builtin.get_url:
+        url: https://pkgs.k8s.io/core:/stable:/{{ kubernetes_minor_version }}/deb/Release.key
+        dest: /tmp/kubernetes-release.key
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Install Kubernetes repository signing key
+      ansible.builtin.command:
+        cmd: gpg --dearmor --yes --output /etc/apt/keyrings/kubernetes-apt-keyring.gpg /tmp/kubernetes-release.key
+        creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+    - name: Configure Kubernetes apt repository
+      ansible.builtin.deb822_repository:
+        name: kubernetes
+        types:
+          - deb
+        uris:
+          - https://pkgs.k8s.io/core:/stable:/{{ kubernetes_minor_version }}/deb/
+        suites:
+          - /
+        signed_by: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+        state: present
+
+    - name: Install Kubernetes node packages
+      ansible.builtin.apt:
+        name:
+          - containerd
+          - kubelet
+          - kubeadm
+          - kubectl
+        state: present
+        update_cache: true
+
+    - name: Read default containerd configuration
+      ansible.builtin.command: containerd config default
+      register: containerd_default_config
+      changed_when: false
+
+    - name: Create containerd configuration if missing
+      ansible.builtin.copy:
+        dest: /etc/containerd/config.toml
+        content: "{{ containerd_default_config.stdout }}\n"
+        owner: root
+        group: root
+        mode: "0644"
+        force: false
+
+    - name: Use systemd cgroups for the Kubernetes container runtime
+      ansible.builtin.replace:
+        path: /etc/containerd/config.toml
+        regexp: 'SystemdCgroup = false'
+        replace: 'SystemdCgroup = true'
+      notify: Restart containerd
+
+    - name: Hold Kubernetes packages at the installed versions
+      ansible.builtin.dpkg_selections:
+        name: "{{ item }}"
+        selection: hold
+      loop:
+        - kubelet
+        - kubeadm
+        - kubectl
+
+    - name: Enable and start containerd
+      ansible.builtin.service:
+        name: containerd
+        state: started
+        enabled: true
+
+    - name: Enable kubelet
+      ansible.builtin.service:
+        name: kubelet
+        enabled: true
+
+  handlers:
+    - name: Restart containerd
+      ansible.builtin.service:
+        name: containerd
+        state: restarted

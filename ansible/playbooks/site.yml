@@ -1,0 +1,12 @@
+---
+- name: Configure all managed hosts
+  ansible.builtin.import_playbook: configure-system.yml
+
+- name: Install Docker on Docker hosts
+  ansible.builtin.import_playbook: install-docker.yml
+
+- name: Install Kubernetes on cluster nodes
+  ansible.builtin.import_playbook: install-kubernetes.yml
+
+- name: Deploy Task Manager
+  ansible.builtin.import_playbook: deploy-app.yml
